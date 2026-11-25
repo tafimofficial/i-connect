@@ -1,0 +1,7 @@
+[package]
+name = "i_connect_proto"
+version = "1.0.0"
+edition = "2021"
+description = "Shared binary network protocol for I Connect (PC <-> Android)"
+
+[dependencies]

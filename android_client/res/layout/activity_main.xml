@@ -1,0 +1,958 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#000000"
+    android:padding="8dp">
+
+    <!-- Top Bar: Header & Connection Controls -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="@drawable/bg_card"
+        android:padding="10dp"
+        android:layout_marginBottom="8dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="I CONNECT"
+                android:textColor="#B6FF00"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+            <View
+                android:id="@+id/dot_status"
+                android:layout_width="10dp"
+                android:layout_height="10dp"
+                android:background="@drawable/dot_red"
+                android:layout_marginEnd="6dp" />
+
+            <TextView
+                android:id="@+id/tv_status"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Disconnected"
+                android:textColor="#F4FCE8"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginTop="8dp">
+
+            <EditText
+                android:id="@+id/et_manual_ip"
+                android:layout_width="0dp"
+                android:layout_height="38dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_button"
+                android:hint="PC IP (e.g. 192.168.1.100)"
+                android:textColorHint="#5A6C4B"
+                android:textColor="#F4FCE8"
+                android:textSize="13sp"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:inputType="text" />
+
+            <Button
+                android:id="@+id/btn_discover"
+                android:layout_width="wrap_content"
+                android:layout_height="38dp"
+                android:text="Scan"
+                android:textColor="#B6FF00"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:background="@drawable/bg_button"
+                android:layout_marginStart="6dp"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp" />
+
+            <Button
+                android:id="@+id/btn_connect"
+                android:layout_width="wrap_content"
+                android:layout_height="38dp"
+                android:text="Connect"
+                android:textColor="#000000"
+                android:textStyle="bold"
+                android:textSize="12sp"
+                android:background="@drawable/bg_button_accent"
+                android:layout_marginStart="6dp"
+                android:paddingStart="14dp"
+                android:paddingEnd="14dp" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/tv_server_ip"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Ready for Wi-Fi / Hotspot direct connection"
+            android:textColor="#889A78"
+            android:textSize="11sp"
+            android:layout_marginTop="4dp" />
+    </LinearLayout>
+
+    <!-- 5-Tab Bar -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="42dp"
+        android:orientation="horizontal"
+        android:background="@drawable/bg_card"
+        android:padding="3dp"
+        android:layout_marginBottom="8dp">
+
+        <LinearLayout
+            android:id="@+id/tab_btn_touchpad"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:clickable="true">
+            <TextView
+                android:id="@+id/tab_txt_touchpad"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Touch"
+                android:textColor="#B6FF00"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/tab_btn_keyboard"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:clickable="true">
+            <TextView
+                android:id="@+id/tab_txt_keyboard"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Keys"
+                android:textColor="#889A78"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/tab_btn_media"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:clickable="true">
+            <TextView
+                android:id="@+id/tab_txt_media"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Media"
+                android:textColor="#889A78"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/tab_btn_commands"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:clickable="true">
+            <TextView
+                android:id="@+id/tab_txt_commands"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="System"
+                android:textColor="#889A78"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/tab_btn_files"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:clickable="true">
+            <TextView
+                android:id="@+id/tab_txt_files"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Files"
+                android:textColor="#889A78"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Content Panels Container -->
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <!-- 1. TOUCHPAD PANEL -->
+        <LinearLayout
+            android:id="@+id/panel_touchpad"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical">
+
+            <com.iconnect.app.TouchpadView
+                android:id="@+id/touchpad_view"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_touchpad" />
+
+            <!-- Sensitivity slider -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginTop="6dp"
+                android:paddingStart="4dp"
+                android:paddingEnd="4dp">
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Speed:"
+                    android:textColor="#889A78"
+                    android:textSize="11sp" />
+                <SeekBar
+                    android:id="@+id/sb_sensitivity"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:progressTint="#B6FF00"
+                    android:thumbTint="#B6FF00"
+                    android:max="100"
+                    android:progress="40" />
+            </LinearLayout>
+
+            <!-- Bottom Left & Right Click Buttons -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="64dp"
+                android:orientation="horizontal"
+                android:layout_marginTop="6dp">
+
+                <Button
+                    android:id="@+id/btn_left_click"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:text="LEFT CLICK"
+                    android:textColor="#B6FF00"
+                    android:textStyle="bold"
+                    android:background="@drawable/bg_button"
+                    android:layout_marginEnd="4dp" />
+
+                <Button
+                    android:id="@+id/btn_right_click"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:text="RIGHT CLICK"
+                    android:textColor="#84CC16"
+                    android:textStyle="bold"
+                    android:background="@drawable/bg_button"
+                    android:layout_marginStart="4dp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- 2. KEYBOARD PANEL -->
+        <ScrollView
+            android:id="@+id/panel_keyboard"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <!-- Live Text Input row -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:layout_marginBottom="8dp">
+
+                    <EditText
+                        android:id="@+id/et_keyboard_text"
+                        android:layout_width="0dp"
+                        android:layout_height="44dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/bg_button"
+                        android:hint="Type here (LIVE sends to PC)..."
+                        android:textColorHint="#5A6C4B"
+                        android:textColor="#F4FCE8"
+                        android:textSize="13sp"
+                        android:paddingStart="10dp"
+                        android:paddingEnd="10dp" />
+
+                    <Button
+                        android:id="@+id/btn_clear_text"
+                        android:layout_width="wrap_content"
+                        android:layout_height="44dp"
+                        android:text="Clear"
+                        android:textColor="#FF4D5E"
+                        android:background="@drawable/bg_button"
+                        android:layout_marginStart="6dp"
+                        android:paddingStart="10dp"
+                        android:paddingEnd="10dp" />
+
+                    <Button
+                        android:id="@+id/btn_toggle_softkbd"
+                        android:layout_width="wrap_content"
+                        android:layout_height="44dp"
+                        android:text="Keyboard"
+                        android:textColor="#B6FF00"
+                        android:background="@drawable/bg_button"
+                        android:layout_marginStart="6dp"
+                        android:paddingStart="10dp"
+                        android:paddingEnd="10dp" />
+                </LinearLayout>
+
+                <!-- Volume Control Row in Keyboard Tab -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="42dp"
+                    android:orientation="horizontal"
+                    android:layout_marginBottom="6dp">
+
+                    <Button
+                        android:id="@+id/btn_kbd_vol_down"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:text="VOL -"
+                        android:textColor="#B6FF00"
+                        android:textStyle="bold"
+                        android:background="@drawable/bg_button"
+                        android:layout_margin="2dp" />
+
+                    <Button
+                        android:id="@+id/btn_kbd_vol_mute"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:text="MUTE"
+                        android:textColor="#FF4D5E"
+                        android:textStyle="bold"
+                        android:background="@drawable/bg_button"
+                        android:layout_margin="2dp" />
+
+                    <Button
+                        android:id="@+id/btn_kbd_vol_up"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:text="VOL +"
+                        android:textColor="#B6FF00"
+                        android:textStyle="bold"
+                        android:background="@drawable/bg_button"
+                        android:layout_margin="2dp" />
+                </LinearLayout>
+
+                <!-- Modifiers row (Ctrl, Shift, Alt, Win) -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="44dp"
+                    android:orientation="horizontal"
+                    android:layout_marginBottom="6dp">
+
+                    <Button
+                        android:id="@+id/btn_key_ctrl"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:text="CTRL"
+                        android:textColor="#F4FCE8"
+                        android:background="@drawable/bg_key"
+                        android:layout_margin="2dp" />
+
+                    <Button
+                        android:id="@+id/btn_key_shift"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:text="SHIFT"
+                        android:textColor="#F4FCE8"
+                        android:background="@drawable/bg_key"
+                        android:layout_margin="2dp" />
+
+                    <Button
+                        android:id="@+id/btn_key_alt"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:text="ALT"
+                        android:textColor="#F4FCE8"
+                        android:background="@drawable/bg_key"
+                        android:layout_margin="2dp" />
+
+                    <Button
+                        android:id="@+id/btn_key_win"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:text="WIN"
+                        android:textColor="#B6FF00"
+                        android:background="@drawable/bg_key"
+                        android:layout_margin="2dp" />
+                </LinearLayout>
+
+                <!-- Navigation row (ESC, TAB, ENTER, BACKSPACE) -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="44dp"
+                    android:orientation="horizontal"
+                    android:layout_marginBottom="6dp">
+
+                    <Button
+                        android:id="@+id/btn_key_esc"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:text="ESC"
+                        android:textColor="#FF4D5E"
+                        android:background="@drawable/bg_key"
+                        android:layout_margin="2dp" />
+
+                    <Button
+                        android:id="@+id/btn_key_tab"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:text="TAB"
+                        android:textColor="#F4FCE8"
+                        android:background="@drawable/bg_key"
+                        android:layout_margin="2dp" />
+
+                    <Button
+                        android:id="@+id/btn_key_enter"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1.3"
+                        android:text="ENTER"
+                        android:textColor="#B6FF00"
+                        android:textStyle="bold"
+                        android:background="@drawable/bg_key"
+                        android:layout_margin="2dp" />
+
+                    <Button
+                        android:id="@+id/btn_key_backspace"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1.3"
+                        android:text="BACKSP"
+                        android:textColor="#FFB020"
+                        android:background="@drawable/bg_key"
+                        android:layout_margin="2dp" />
+                </LinearLayout>
+
+                <!-- Function Keys Row 1 (F1 - F6) -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="38dp"
+                    android:orientation="horizontal"
+                    android:layout_marginBottom="4dp">
+
+                    <Button android:id="@+id/btn_key_f1" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:text="F1" android:textColor="#B6FF00" android:background="@drawable/bg_key" android:layout_margin="1dp" />
+                    <Button android:id="@+id/btn_key_f2" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:text="F2" android:textColor="#B6FF00" android:background="@drawable/bg_key" android:layout_margin="1dp" />
+                    <Button android:id="@+id/btn_key_f3" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:text="F3" android:textColor="#B6FF00" android:background="@drawable/bg_key" android:layout_margin="1dp" />
+                    <Button android:id="@+id/btn_key_f4" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:text="F4" android:textColor="#B6FF00" android:background="@drawable/bg_key" android:layout_margin="1dp" />
+                    <Button android:id="@+id/btn_key_f5" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:text="F5" android:textColor="#B6FF00" android:background="@drawable/bg_key" android:layout_margin="1dp" />
+                    <Button android:id="@+id/btn_key_f6" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:text="F6" android:textColor="#B6FF00" android:background="@drawable/bg_key" android:layout_margin="1dp" />
+                </LinearLayout>
+
+                <!-- Function Keys Row 2 (F7 - F12) -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="38dp"
+                    android:orientation="horizontal"
+                    android:layout_marginBottom="8dp">
+
+                    <Button android:id="@+id/btn_key_f7" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:text="F7" android:textColor="#84CC16" android:background="@drawable/bg_key" android:layout_margin="1dp" />
+                    <Button android:id="@+id/btn_key_f8" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:text="F8" android:textColor="#84CC16" android:background="@drawable/bg_key" android:layout_margin="1dp" />
+                    <Button android:id="@+id/btn_key_f9" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:text="F9" android:textColor="#84CC16" android:background="@drawable/bg_key" android:layout_margin="1dp" />
+                    <Button android:id="@+id/btn_key_f10" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:text="F10" android:textColor="#84CC16" android:background="@drawable/bg_key" android:layout_margin="1dp" />
+                    <Button android:id="@+id/btn_key_f11" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:text="F11" android:textColor="#84CC16" android:background="@drawable/bg_key" android:layout_margin="1dp" />
+                    <Button android:id="@+id/btn_key_f12" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1" android:text="F12" android:textColor="#84CC16" android:background="@drawable/bg_key" android:layout_margin="1dp" />
+                </LinearLayout>
+
+                <!-- Space / Delete & Arrow Pad -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:layout_marginTop="4dp">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+                        <Button android:id="@+id/btn_key_space" android:layout_width="match_parent" android:layout_height="40dp" android:text="SPACE" android:textColor="#F4FCE8" android:background="@drawable/bg_key" android:layout_marginBottom="4dp" />
+                        <Button android:id="@+id/btn_key_del" android:layout_width="match_parent" android:layout_height="40dp" android:text="DELETE" android:textColor="#FF4D5E" android:background="@drawable/bg_key" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical"
+                        android:gravity="center">
+
+                        <Button android:id="@+id/btn_key_up" android:layout_width="50dp" android:layout_height="40dp" android:text="▲" android:textColor="#B6FF00" android:background="@drawable/bg_key" />
+                        <LinearLayout
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal">
+                            <Button android:id="@+id/btn_key_left" android:layout_width="50dp" android:layout_height="40dp" android:text="◀" android:textColor="#B6FF00" android:background="@drawable/bg_key" android:layout_marginEnd="4dp" />
+                            <Button android:id="@+id/btn_key_down" android:layout_width="50dp" android:layout_height="40dp" android:text="▼" android:textColor="#B6FF00" android:background="@drawable/bg_key" />
+                            <Button android:id="@+id/btn_key_right" android:layout_width="50dp" android:layout_height="40dp" android:text="▶" android:textColor="#B6FF00" android:background="@drawable/bg_key" android:layout_marginStart="4dp" />
+                        </LinearLayout>
+                    </LinearLayout>
+                </LinearLayout>
+            </LinearLayout>
+        </ScrollView>
+
+        <!-- 3. MEDIA CONTROLLER PANEL -->
+        <ScrollView
+            android:id="@+id/panel_media"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="4dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:background="@drawable/bg_card"
+                    android:padding="14dp"
+                    android:layout_marginBottom="10dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="PLAYBACK DECK"
+                        android:textColor="#B6FF00"
+                        android:textSize="12sp"
+                        android:textStyle="bold" />
+
+                    <Button
+                        android:id="@+id/btn_media_play_pause"
+                        android:layout_width="match_parent"
+                        android:layout_height="56dp"
+                        android:text="▶ / ⏸  PLAY / PAUSE"
+                        android:textColor="#000000"
+                        android:textStyle="bold"
+                        android:textSize="15sp"
+                        android:background="@drawable/bg_button_accent"
+                        android:layout_marginTop="10dp"
+                        android:layout_marginBottom="10dp" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="48dp"
+                        android:orientation="horizontal"
+                        android:layout_marginBottom="8dp">
+
+                        <Button
+                            android:id="@+id/btn_media_prev"
+                            android:layout_width="0dp"
+                            android:layout_height="match_parent"
+                            android:layout_weight="1"
+                            android:text="⏮ PREV"
+                            android:textColor="#F4FCE8"
+                            android:textStyle="bold"
+                            android:background="@drawable/bg_button"
+                            android:layout_marginEnd="4dp" />
+
+                        <Button
+                            android:id="@+id/btn_media_next"
+                            android:layout_width="0dp"
+                            android:layout_height="match_parent"
+                            android:layout_weight="1"
+                            android:text="NEXT ⏭"
+                            android:textColor="#F4FCE8"
+                            android:textStyle="bold"
+                            android:background="@drawable/bg_button"
+                            android:layout_marginStart="4dp" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="46dp"
+                        android:orientation="horizontal">
+
+                        <Button
+                            android:id="@+id/btn_media_seek_back"
+                            android:layout_width="0dp"
+                            android:layout_height="match_parent"
+                            android:layout_weight="1"
+                            android:text="⏪ -5s"
+                            android:textColor="#B6FF00"
+                            android:textStyle="bold"
+                            android:background="@drawable/bg_button"
+                            android:layout_marginEnd="4dp" />
+
+                        <Button
+                            android:id="@+id/btn_media_seek_fwd"
+                            android:layout_width="0dp"
+                            android:layout_height="match_parent"
+                            android:layout_weight="1"
+                            android:text="+5s ⏩"
+                            android:textColor="#B6FF00"
+                            android:textStyle="bold"
+                            android:background="@drawable/bg_button"
+                            android:layout_marginStart="4dp" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <!-- Timeline Seekbar Card -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:background="@drawable/bg_card"
+                    android:padding="14dp"
+                    android:layout_marginBottom="10dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal">
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="TIMELINE JUMP (0% – 100%)"
+                            android:textColor="#889A78"
+                            android:textSize="12sp"
+                            android:textStyle="bold" />
+                        <TextView
+                            android:id="@+id/tv_media_seek_pct"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="0%"
+                            android:textColor="#B6FF00"
+                            android:textSize="12sp"
+                            android:textStyle="bold" />
+                    </LinearLayout>
+
+                    <SeekBar
+                        android:id="@+id/sb_media_seek"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:progressTint="#B6FF00"
+                        android:thumbTint="#B6FF00"
+                        android:max="100"
+                        android:progress="0"
+                        android:layout_marginTop="8dp" />
+                </LinearLayout>
+
+                <!-- Volume Deck Card -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:background="@drawable/bg_card"
+                    android:padding="14dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="MASTER VOLUME"
+                        android:textColor="#889A78"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:layout_marginBottom="8dp" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="48dp"
+                        android:orientation="horizontal">
+
+                        <Button
+                            android:id="@+id/btn_media_vol_down"
+                            android:layout_width="0dp"
+                            android:layout_height="match_parent"
+                            android:layout_weight="1"
+                            android:text="🔉 VOL -"
+                            android:textColor="#B6FF00"
+                            android:textStyle="bold"
+                            android:background="@drawable/bg_button"
+                            android:layout_marginEnd="4dp" />
+
+                        <Button
+                            android:id="@+id/btn_media_mute"
+                            android:layout_width="0dp"
+                            android:layout_height="match_parent"
+                            android:layout_weight="1"
+                            android:text="🔇 MUTE"
+                            android:textColor="#FF4D5E"
+                            android:textStyle="bold"
+                            android:background="@drawable/bg_button"
+                            android:layout_marginStart="2dp"
+                            android:layout_marginEnd="2dp" />
+
+                        <Button
+                            android:id="@+id/btn_media_vol_up"
+                            android:layout_width="0dp"
+                            android:layout_height="match_parent"
+                            android:layout_weight="1"
+                            android:text="🔊 VOL +"
+                            android:textColor="#B6FF00"
+                            android:textStyle="bold"
+                            android:background="@drawable/bg_button"
+                            android:layout_marginStart="4dp" />
+                    </LinearLayout>
+                </LinearLayout>
+            </LinearLayout>
+        </ScrollView>
+
+        <!-- 4. SYSTEM COMMAND SHORTCUTS PANEL -->
+        <ScrollView
+            android:id="@+id/panel_commands"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="4dp">
+
+                <Button
+                    android:id="@+id/btn_cmd_lock"
+                    android:layout_width="match_parent"
+                    android:layout_height="50dp"
+                    android:text="🔒 Lock Workstation (Win + L)"
+                    android:textColor="#B6FF00"
+                    android:textSize="14sp"
+                    android:background="@drawable/bg_button"
+                    android:layout_marginBottom="8dp" />
+
+                <Button
+                    android:id="@+id/btn_cmd_showdesktop"
+                    android:layout_width="match_parent"
+                    android:layout_height="50dp"
+                    android:text="🖥 Show Desktop / Minimize All (Win + D)"
+                    android:textColor="#F4FCE8"
+                    android:textSize="14sp"
+                    android:background="@drawable/bg_button"
+                    android:layout_marginBottom="8dp" />
+
+                <Button
+                    android:id="@+id/btn_cmd_closewindow"
+                    android:layout_width="match_parent"
+                    android:layout_height="50dp"
+                    android:text="❌ Close Active Window (Alt + F4)"
+                    android:textColor="#FF4D5E"
+                    android:textSize="14sp"
+                    android:background="@drawable/bg_button"
+                    android:layout_marginBottom="8dp" />
+
+                <Button
+                    android:id="@+id/btn_cmd_taskmgr"
+                    android:layout_width="match_parent"
+                    android:layout_height="50dp"
+                    android:text="⚡ Open Task Manager"
+                    android:textColor="#B6FF00"
+                    android:textSize="14sp"
+                    android:background="@drawable/bg_button"
+                    android:layout_marginBottom="8dp" />
+
+                <Button
+                    android:id="@+id/btn_cmd_sleep"
+                    android:layout_width="match_parent"
+                    android:layout_height="50dp"
+                    android:text="🌙 PC Sleep Mode"
+                    android:textColor="#FFB020"
+                    android:textSize="14sp"
+                    android:background="@drawable/bg_button"
+                    android:layout_marginBottom="8dp" />
+
+                <Button
+                    android:id="@+id/btn_cmd_restart"
+                    android:layout_width="match_parent"
+                    android:layout_height="50dp"
+                    android:text="🔄 Restart PC"
+                    android:textColor="#FFB020"
+                    android:textSize="14sp"
+                    android:background="@drawable/bg_button"
+                    android:layout_marginBottom="8dp" />
+
+                <Button
+                    android:id="@+id/btn_cmd_shutdown"
+                    android:layout_width="match_parent"
+                    android:layout_height="50dp"
+                    android:text="⚠️ Power Off / Shutdown PC"
+                    android:textColor="#FF4D5E"
+                    android:textStyle="bold"
+                    android:textSize="14sp"
+                    android:background="@drawable/bg_button"
+                    android:layout_marginBottom="8dp" />
+            </LinearLayout>
+        </ScrollView>
+
+        <!-- 5. TURBO FILE TRANSFER PANEL -->
+        <ScrollView
+            android:id="@+id/panel_files"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="6dp">
+
+                <Button
+                    android:id="@+id/btn_pick_folders"
+                    android:layout_width="match_parent"
+                    android:layout_height="52dp"
+                    android:text="📁 SELECT &amp; SEND FOLDERS TO PC"
+                    android:textColor="#000000"
+                    android:textStyle="bold"
+                    android:textSize="14sp"
+                    android:background="@drawable/bg_button_accent"
+                    android:layout_marginBottom="8dp" />
+
+                <Button
+                    android:id="@+id/btn_pick_files"
+                    android:layout_width="match_parent"
+                    android:layout_height="46dp"
+                    android:text="📄 SELECT &amp; SEND MULTIPLE FILES TO PC"
+                    android:textColor="#B6FF00"
+                    android:textStyle="bold"
+                    android:textSize="13sp"
+                    android:background="@drawable/bg_button"
+                    android:layout_marginBottom="12dp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:background="@drawable/bg_card"
+                    android:padding="12dp"
+                    android:layout_marginBottom="12dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal">
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Live Transfer Monitor"
+                            android:textColor="#F4FCE8"
+                            android:textSize="13sp"
+                            android:textStyle="bold" />
+                        <TextView
+                            android:id="@+id/tv_transfer_speed"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="0.0 MB/s"
+                            android:textColor="#B6FF00"
+                            android:textSize="13sp"
+                            android:textStyle="bold" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/tv_transfer_info"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Idle. Ready for high-speed transmission."
+                        android:textColor="#889A78"
+                        android:textSize="12sp"
+                        android:layout_marginTop="6dp" />
+
+                    <ProgressBar
+                        android:id="@+id/pb_file_transfer"
+                        style="?android:attr/progressBarStyleHorizontal"
+                        android:layout_width="match_parent"
+                        android:layout_height="14dp"
+                        android:max="100"
+                        android:progress="0"
+                        android:progressDrawable="@drawable/pb_lime"
+                        android:layout_marginTop="8dp" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:background="@drawable/bg_card"
+                    android:padding="12dp"
+                    android:layout_marginBottom="12dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="📥 Incoming Files from PC"
+                        android:textColor="#B6FF00"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Drag and drop files or folders onto the I Connect PC window to stream automatically to your phone at full Wi-Fi/Hotspot speed!"
+                        android:textColor="#9DB28C"
+                        android:textSize="12sp"
+                        android:layout_marginTop="4dp" />
+
+                    <Button
+                        android:id="@+id/btn_open_downloads"
+                        android:layout_width="match_parent"
+                        android:layout_height="44dp"
+                        android:text="📂 Open Received Downloads Folder"
+                        android:textColor="#B6FF00"
+                        android:textStyle="bold"
+                        android:background="@drawable/bg_button"
+                        android:layout_marginTop="10dp" />
+                </LinearLayout>
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="⚡ Turbo Link: Direct Wi-Fi / Phone Hotspot TCP sockets. Zero cellular data used."
+                    android:textColor="#5A6C4B"
+                    android:textSize="11sp"
+                    android:gravity="center"
+                    android:layout_marginTop="6dp" />
+            </LinearLayout>
+        </ScrollView>
+
+    </FrameLayout>
+</LinearLayout>

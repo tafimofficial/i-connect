@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bg_main">#000000</color>
+    <color name="bg_card">#090D07</color>
+    <color name="bg_card_border">#1D2C13</color>
+    <color name="accent_lime">#B6FF00</color>
+    <color name="accent_lime_dim">#84CC16</color>
+    <color name="accent_red">#FF4D5E</color>
+    <color name="accent_amber">#FFB020</color>
+    <color name="text_main">#F4FCE8</color>
+    <color name="text_muted">#889A78</color>
+    <color name="tab_bg">#090D07</color>
+    <color name="tab_selected">#18260E</color>
+    <color name="btn_normal">#10150D</color>
+    <color name="btn_pressed">#1E2B14</color>
+</resources>

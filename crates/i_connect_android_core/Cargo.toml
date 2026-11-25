@@ -1,0 +1,16 @@
+[package]
+name = "i_connect_android_core"
+version = "1.0.0"
+edition = "2021"
+description = "Pure Rust Android JNI Engine for I Connect"
+
+[lib]
+name = "iconnect_core"
+crate-type = ["cdylib"]
+
+[dependencies]
+i_connect_proto = { path = "../i_connect_proto" }
+jni = "0.21"
+socket2 = { version = "0.6", features = ["all"] }
+log = "0.4"
+android_logger = "0.14"

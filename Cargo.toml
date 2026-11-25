@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/i_connect_proto",
+    "crates/i_connect_server",
+    "crates/i_connect_installer",
+    "crates/i_connect_uninstaller",
+    "crates/i_connect_android_core",
+]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
