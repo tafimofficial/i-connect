@@ -11,6 +11,7 @@ crate-type = ["cdylib"]
 [dependencies]
 i_connect_proto = { path = "../i_connect_proto" }
 jni = "0.21"
+libc = "0.2"
 socket2 = { version = "0.6", features = ["all"] }
 log = "0.4"
 android_logger = "0.14"

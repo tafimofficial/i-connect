@@ -116,7 +116,10 @@ public class RemoteService extends Service {
         try {
             WifiManager wm = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
             if (wm != null && (wifiLock == null || !wifiLock.isHeld())) {
-                wifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "IConnect:WifiLock");
+                int mode = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+                        ? WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+                        : WifiManager.WIFI_MODE_FULL_HIGH_PERF;
+                wifiLock = wm.createWifiLock(mode, "IConnect:WifiLock");
                 wifiLock.setReferenceCounted(false);
                 wifiLock.acquire();
             }
@@ -257,49 +260,55 @@ public class RemoteService extends Service {
         if (isListeningIncoming || ip == null || ip.isEmpty()) return;
         isListeningIncoming = true;
 
-        new Thread(new Runnable() {
+        File saveFolderTmp = null;
+        try {
+            File downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+            if (downloadDir != null && (downloadDir.exists() || downloadDir.mkdirs())) {
+                saveFolderTmp = new File(downloadDir, "I_Connect_Transfers");
+            }
+        } catch (Exception ignored) {}
+        if (saveFolderTmp == null) {
+            saveFolderTmp = new File(getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "I_Connect_Transfers");
+        }
+        if (!saveFolderTmp.exists()) saveFolderTmp.mkdirs();
+        final String savePath = saveFolderTmp.getAbsolutePath();
+
+        final FileTransferCallback bridgeCallback = new FileTransferCallback() {
             @Override
-            public void run() {
-                try {
-                    int res = NativeCore.connectFileChannel(ip, 52201);
-                    if (res == 1) {
-                        File saveFolder = null;
-                        try {
-                            File downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
-                            if (downloadDir != null && (downloadDir.exists() || downloadDir.mkdirs())) {
-                                saveFolder = new File(downloadDir, "I_Connect_Transfers");
-                            }
-                        } catch (Exception ignored) {}
-                        if (saveFolder == null) {
-                            saveFolder = new File(getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "I_Connect_Transfers");
-                        }
-                        if (!saveFolder.exists()) saveFolder.mkdirs();
-
-                        NativeCore.listenIncomingFiles(saveFolder.getAbsolutePath(), new FileTransferCallback() {
-                            @Override
-                            public void onFileProgress(int fileIdx, int totalFiles, String name, long transferred, long totalBytes, float mbps) {
-                                int pct = (totalBytes > 0) ? (int) ((transferred * 100) / totalBytes) : 0;
-                                updateTransferNotification(name, pct, mbps, fileIdx, totalFiles);
-                                if (activeUiCallback != null) {
-                                    activeUiCallback.onFileProgress(fileIdx, totalFiles, name, transferred, totalBytes, mbps);
-                                }
-                            }
-
-                            @Override
-                            public void onBatchFinished(int totalFiles) {
-                                updateFinishedNotification(totalFiles);
-                                if (activeUiCallback != null) {
-                                    activeUiCallback.onBatchFinished(totalFiles);
-                                }
-                            }
-                        });
-                    }
-                } catch (Exception e) {
-                    e.printStackTrace();
-                } finally {
-                    isListeningIncoming = false;
+            public void onFileProgress(int fileIdx, int totalFiles, String name, long transferred, long totalBytes, float mbps) {
+                int pct = (totalBytes > 0) ? (int) ((transferred * 100) / totalBytes) : 0;
+                updateTransferNotification(name, pct, mbps, fileIdx, totalFiles);
+                if (activeUiCallback != null) {
+                    activeUiCallback.onFileProgress(fileIdx, totalFiles, name, transferred, totalBytes, mbps);
                 }
             }
-        }).start();
+
+            @Override
+            public void onBatchFinished(int totalFiles) {
+                updateFinishedNotification(totalFiles);
+                if (activeUiCallback != null) {
+                    activeUiCallback.onBatchFinished(totalFiles);
+                }
+            }
+        };
+
+        // Spawn 4 parallel incoming workers so PC -> Phone drag & drop saturates the link
+        for (int w = 0; w < 4; w++) {
+            final int workerIdx = w;
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        NativeCore.runIncomingWorker(ip, 52201, savePath, bridgeCallback);
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    } finally {
+                        if (workerIdx == 0) {
+                            isListeningIncoming = false;
+                        }
+                    }
+                }
+            }, "IConnect-Rx-" + w).start();
+        }
     }
 }

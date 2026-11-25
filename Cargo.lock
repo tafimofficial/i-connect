@@ -115,6 +115,7 @@ dependencies = [
  "android_logger",
  "i_connect_proto",
  "jni",
+ "libc",
  "log",
  "socket2",
 ]

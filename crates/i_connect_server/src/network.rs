@@ -8,14 +8,17 @@ use crate::state::{
 use i_connect_proto::{
     sanitize_relative_path, send_frame, CHUNK_BUFFER_SIZE, DISCOVER_PING_MAGIC,
     DISCOVER_PONG_MAGIC, PROTO_MAGIC, REMOTE_CONTROL_PORT, REMOTE_FILE_PORT, REMOTE_UDP_PORT,
-    SOCKET_BUFFER_SIZE,
+    SOCKET_BUFFER_SIZE, STRIPE_SIZE,
 };
-use std::fs::{self, File};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::fs::{self, File, OpenOptions};
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream, UdpSocket};
+use std::os::windows::fs::FileExt;
 use std::os::windows::io::AsRawSocket;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -38,8 +41,9 @@ pub const WM_APP_TRAY_FILE_DONE: u32 = WM_USER + 204;
 // Note: protocol constants imported cleanly
 #[allow(unused_imports)]
 use i_connect_proto::{
-    MsgAuthReq, MsgAuthResp, MsgFileBatchHeader, MsgFileItemHeader, MsgKeyEvent, MsgMediaCmd,
-    MsgMouseClick, MsgMouseMove, MsgMouseScroll, MsgSysCmd, MsgTextInput, MsgType, RemoteHeader,
+    MsgAuthReq, MsgAuthResp, MsgFileBatchHeader, MsgFileChannelHello, MsgFileItemHeader,
+    MsgFileRangeHeader, MsgKeyEvent, MsgMediaCmd, MsgMouseClick, MsgMouseMove, MsgMouseScroll,
+    MsgSysCmd, MsgTextInput, MsgType, RemoteHeader,
 };
 
 fn cstr_from_i8(buf: &[i8]) -> String {
@@ -455,6 +459,7 @@ fn handle_control_client(mut stream: TcpStream, state: SharedState, running: Run
         s.client_name = "None".to_string();
         s.client_id.clear();
         s.client_file_stream = None;
+        s.client_file_workers.clear();
     }
     post_ui_msg(&state, WM_APP_TRAY_DISCONNECTED);
     trigger_repaint(&state);
@@ -462,9 +467,59 @@ fn handle_control_client(mut stream: TcpStream, state: SharedState, running: Run
 
 fn configure_turbo_socket(stream: &TcpStream) {
     let sock_ref = socket2::SockRef::from(stream);
-    let _ = sock_ref.set_tcp_nodelay(true);
+    // Keep Nagle enabled on bulk file streams so Wi-Fi A-MPDU frames coalesce cleanly.
+    let _ = sock_ref.set_tcp_nodelay(false);
     let _ = sock_ref.set_recv_buffer_size(SOCKET_BUFFER_SIZE as usize);
     let _ = sock_ref.set_send_buffer_size(SOCKET_BUFFER_SIZE as usize);
+}
+
+struct RangeBatchProgress {
+    start: Instant,
+    bytes_done: AtomicU64,
+    last_ui_ms: AtomicU64,
+    finished: AtomicBool,
+    preallocated: Mutex<HashSet<u32>>,
+}
+
+static INCOMING_BATCHES: OnceLock<Mutex<HashMap<u64, Arc<RangeBatchProgress>>>> = OnceLock::new();
+static NEXT_SEND_BATCH_ID: AtomicU64 = AtomicU64::new(1);
+
+fn incoming_batches() -> &'static Mutex<HashMap<u64, Arc<RangeBatchProgress>>> {
+    INCOMING_BATCHES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn get_or_create_batch(batch_id: u64) -> Arc<RangeBatchProgress> {
+    let mut map = incoming_batches().lock().unwrap();
+    if let Some(b) = map.get(&batch_id) {
+        return b.clone();
+    }
+    if map.len() > 32 {
+        map.clear();
+    }
+    let b = Arc::new(RangeBatchProgress {
+        start: Instant::now(),
+        bytes_done: AtomicU64::new(0),
+        last_ui_ms: AtomicU64::new(0),
+        finished: AtomicBool::new(false),
+        preallocated: Mutex::new(HashSet::new()),
+    });
+    map.insert(batch_id, b.clone());
+    b
+}
+
+fn seek_write_all(file: &File, mut offset: u64, mut data: &[u8]) -> std::io::Result<()> {
+    while !data.is_empty() {
+        let n = file.seek_write(data, offset)?;
+        if n == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::WriteZero,
+                "seek_write returned 0",
+            ));
+        }
+        offset += n as u64;
+        data = &data[n..];
+    }
+    Ok(())
 }
 
 fn file_receiver_server_thread(state: SharedState, running: RunningFlag) {
@@ -473,8 +528,8 @@ fn file_receiver_server_thread(state: SharedState, running: RunningFlag) {
         Err(_) => return,
     };
     set_exclusive_addr(&sock);
-    let _ = sock.set_recv_buffer_size(512 * 1024);
-    let _ = sock.set_send_buffer_size(512 * 1024);
+    let _ = sock.set_recv_buffer_size(SOCKET_BUFFER_SIZE as usize);
+    let _ = sock.set_send_buffer_size(SOCKET_BUFFER_SIZE as usize);
 
     let bind_addr = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, REMOTE_FILE_PORT);
     if let Err(e) = sock.bind(&bind_addr.into()) {
@@ -486,7 +541,7 @@ fn file_receiver_server_thread(state: SharedState, running: RunningFlag) {
         trigger_repaint(&state);
         return;
     }
-    if sock.listen(4).is_err() {
+    if sock.listen(64).is_err() {
         return;
     }
     let listener: TcpListener = sock.into();
@@ -522,6 +577,7 @@ fn handle_file_client(
     configure_turbo_socket(&file_stream);
 
     let mut my_conn_id = 0u64;
+    let mut is_pooled_worker = false;
     if let Ok(cloned) = file_stream.try_clone() {
         if let Ok(mut s) = state.lock() {
             s.client_file_conn_id = s.client_file_conn_id.wrapping_add(1);
@@ -531,6 +587,7 @@ fn handle_file_client(
     }
 
     let mut chunk_buf = vec![0u8; CHUNK_BUFFER_SIZE];
+
     while running.load(Ordering::Relaxed) {
         let hdr = match RemoteHeader::read_from(&mut file_stream) {
             Ok(h) => h,
@@ -541,6 +598,121 @@ fn handle_file_client(
         }
 
         match MsgType::from_u16(hdr.msg_type) {
+            Some(MsgType::FileChannelHello) => {
+                let mut buf = [0u8; MsgFileChannelHello::WIRE_LEN];
+                if file_stream.read_exact(&mut buf).is_err() {
+                    break;
+                }
+                if let Ok(hello) = MsgFileChannelHello::decode(&buf) {
+                    if hello.role == 1 {
+                        is_pooled_worker = true;
+                        if let Ok(cloned) = file_stream.try_clone() {
+                            if let Ok(mut s) = state.lock() {
+                                if s.client_file_workers.len() >= 8 {
+                                    s.client_file_workers.remove(0);
+                                }
+                                s.client_file_workers.push((my_conn_id, cloned));
+                            }
+                        }
+                    }
+                }
+            }
+            Some(MsgType::FileRangeHeader) => {
+                let mut buf = [0u8; MsgFileRangeHeader::WIRE_LEN];
+                if file_stream.read_exact(&mut buf).is_err() {
+                    break;
+                }
+                let Ok(range) = MsgFileRangeHeader::decode(&buf) else {
+                    break;
+                };
+
+                let batch = get_or_create_batch(range.batch_id);
+                let mut dest_path = save_dir.clone();
+                for part in sanitize_relative_path(&range.file_name) {
+                    dest_path.push(part);
+                }
+
+                // Preallocate file size once per file_index across parallel workers
+                {
+                    let mut pre = batch.preallocated.lock().unwrap();
+                    if pre.insert(range.file_index) {
+                        if let Some(parent) = dest_path.parent() {
+                            let _ = fs::create_dir_all(parent);
+                        }
+                        if let Ok(f) = OpenOptions::new()
+                            .create(true)
+                            .write(true)
+                            .truncate(true)
+                            .open(&dest_path)
+                        {
+                            let _ = f.set_len(range.file_size);
+                        }
+                    }
+                }
+
+                if let Ok(mut s) = state.lock() {
+                    s.transfer.is_transferring = true;
+                    s.transfer.is_sending = false;
+                    s.transfer.total_files_in_batch = range.total_files;
+                    s.transfer.current_file_index = range.file_index + 1;
+                    s.transfer.current_file_name = range.file_name.clone();
+                    s.transfer.current_file_size = range.batch_total_bytes.max(range.file_size);
+                }
+
+                let stripe_file = OpenOptions::new().write(true).open(&dest_path).ok();
+
+                let mut remaining = range.chunk_len;
+                let mut cur_offset = range.offset;
+
+                while remaining > 0 && running.load(Ordering::Relaxed) {
+                    let to_read = (remaining as usize).min(CHUNK_BUFFER_SIZE);
+                    let n = match file_stream.read(&mut chunk_buf[..to_read]) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => n,
+                    };
+                    if let Some(ref file) = stripe_file {
+                        let _ = seek_write_all(file, cur_offset, &chunk_buf[..n]);
+                    }
+                    cur_offset += n as u64;
+                    remaining -= n as u64;
+
+                    let done = batch.bytes_done.fetch_add(n as u64, Ordering::Relaxed) + n as u64;
+                    let now_ms = batch.start.elapsed().as_millis() as u64;
+                    let prev_ms = batch.last_ui_ms.load(Ordering::Relaxed);
+                    if (now_ms >= prev_ms + 180 || done >= range.batch_total_bytes)
+                        && batch
+                            .last_ui_ms
+                            .compare_exchange(prev_ms, now_ms, Ordering::Relaxed, Ordering::Relaxed)
+                            .is_ok()
+                    {
+                        let elapsed = batch.start.elapsed().as_secs_f64();
+                        let mbps = if elapsed > 0.02 {
+                            ((done as f64 / (1024.0 * 1024.0)) / elapsed) as f32
+                        } else {
+                            0.0
+                        };
+                        if let Ok(mut s) = state.lock() {
+                            s.transfer.current_file_transferred = done;
+                            s.transfer.current_speed_mbps = mbps;
+                        }
+                        trigger_repaint(&state);
+                    }
+                }
+                drop(stripe_file);
+
+                let done = batch.bytes_done.load(Ordering::Relaxed);
+                if done >= range.batch_total_bytes && !batch.finished.swap(true, Ordering::SeqCst) {
+                    if let Ok(mut map) = incoming_batches().lock() {
+                        map.remove(&range.batch_id);
+                    }
+                    if let Ok(mut s) = state.lock() {
+                        s.transfer.is_transferring = false;
+                        s.transfer.current_speed_mbps = 0.0;
+                    }
+                    trigger_repaint(&state);
+                    post_ui_msg(&state, WM_APP_TRAY_FILE_DONE);
+                }
+            }
             Some(MsgType::FileBatchHeader) => {
                 let mut buf = [0u8; MsgFileBatchHeader::WIRE_LEN];
                 if file_stream.read_exact(&mut buf).is_err() {
@@ -585,7 +757,7 @@ fn handle_file_client(
 
                 let mut writer = File::create(&dest_path)
                     .ok()
-                    .map(|f| BufWriter::with_capacity(2 * 1024 * 1024, f));
+                    .map(|f| BufWriter::with_capacity(4 * 1024 * 1024, f));
 
                 let mut remaining = item.file_size;
                 let mut last_speed_tick = Instant::now();
@@ -635,6 +807,9 @@ fn handle_file_client(
     }
 
     if let Ok(mut s) = state.lock() {
+        if is_pooled_worker {
+            s.client_file_workers.retain(|(id, _)| *id != my_conn_id);
+        }
         if s.client_file_conn_id == my_conn_id {
             s.client_file_stream = None;
             s.transfer.is_transferring = false;
@@ -701,6 +876,140 @@ pub fn send_dropped_paths_to_phone(paths: Vec<PathBuf>, state: SharedState) {
         }
 
         if items.is_empty() {
+            return;
+        }
+
+        let workers: Vec<TcpStream> = state
+            .lock()
+            .ok()
+            .map(|s| {
+                s.client_file_workers
+                    .iter()
+                    .filter_map(|(_, sock)| sock.try_clone().ok())
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        if !workers.is_empty() {
+            // 4-Stream Parallel Striped Transfer (PC -> Phone at max Wi-Fi/Hotspot wire speed)
+            let batch_id = NEXT_SEND_BATCH_ID.fetch_add(1, Ordering::Relaxed);
+            let total_files = items.len() as u32;
+            let mut queue = VecDeque::new();
+            for (idx, item) in items.iter().enumerate() {
+                if item.file_size == 0 {
+                    queue.push_back((idx as u32, item.full_path.clone(), item.rel_name.clone(), 0u64, 0u64, 0u64));
+                } else {
+                    let mut off = 0u64;
+                    while off < item.file_size {
+                        let len = (item.file_size - off).min(STRIPE_SIZE);
+                        queue.push_back((idx as u32, item.full_path.clone(), item.rel_name.clone(), item.file_size, off, len));
+                        off += len;
+                    }
+                }
+            }
+
+            if let Ok(mut s) = state.lock() {
+                s.transfer.is_transferring = true;
+                s.transfer.is_sending = true;
+                s.transfer.total_files_in_batch = total_files;
+                s.transfer.current_file_index = 1;
+                s.transfer.current_file_name = items[0].rel_name.clone();
+                s.transfer.current_file_size = total_bytes;
+                s.transfer.current_file_transferred = 0;
+            }
+            trigger_repaint(&state);
+
+            let shared_q = Arc::new(Mutex::new(queue));
+            let bytes_done = Arc::new(AtomicU64::new(0));
+            let last_ui_ms = Arc::new(AtomicU64::new(0));
+            let start = Instant::now();
+
+            let mut handles = Vec::with_capacity(workers.len());
+            for mut stream in workers {
+                configure_turbo_socket(&stream);
+                let q = shared_q.clone();
+                let st = state.clone();
+                let done_ctr = bytes_done.clone();
+                let ui_ms = last_ui_ms.clone();
+
+                handles.push(thread::spawn(move || {
+                    let mut chunk_buf = vec![0u8; CHUNK_BUFFER_SIZE];
+                    loop {
+                        let task = {
+                            let mut guard = q.lock().unwrap();
+                            guard.pop_front()
+                        };
+                        let Some((fidx, fpath, rel_name, fsize, offset, len)) = task else {
+                            break;
+                        };
+                        let Ok(file) = File::open(&fpath) else {
+                            continue;
+                        };
+
+                        let hdr = MsgFileRangeHeader::new(
+                            batch_id,
+                            fidx,
+                            total_files,
+                            total_bytes,
+                            fsize,
+                            offset,
+                            len,
+                            &rel_name,
+                        );
+                        if send_frame(&mut stream, MsgType::FileRangeHeader, &hdr.encode()).is_err() {
+                            break;
+                        }
+
+                        let mut cur_off = offset;
+                        let mut rem = len;
+                        while rem > 0 {
+                            let to_read = (rem as usize).min(CHUNK_BUFFER_SIZE);
+                            let n = match file.seek_read(&mut chunk_buf[..to_read], cur_off) {
+                                Ok(0) | Err(_) => break,
+                                Ok(n) => n,
+                            };
+                            if stream.write_all(&chunk_buf[..n]).is_err() {
+                                break;
+                            }
+                            cur_off += n as u64;
+                            rem -= n as u64;
+
+                            let done = done_ctr.fetch_add(n as u64, Ordering::Relaxed) + n as u64;
+                            let now_ms = start.elapsed().as_millis() as u64;
+                            let prev_ms = ui_ms.load(Ordering::Relaxed);
+                            if (now_ms >= prev_ms + 180 || done >= total_bytes)
+                                && ui_ms
+                                    .compare_exchange(prev_ms, now_ms, Ordering::Relaxed, Ordering::Relaxed)
+                                    .is_ok()
+                            {
+                                let el = start.elapsed().as_secs_f64();
+                                let mbps = if el > 0.02 {
+                                    ((done as f64 / (1024.0 * 1024.0)) / el) as f32
+                                } else {
+                                    0.0
+                                };
+                                if let Ok(mut s) = st.lock() {
+                                    s.transfer.current_file_index = fidx + 1;
+                                    s.transfer.current_file_name = rel_name.clone();
+                                    s.transfer.current_file_transferred = done;
+                                    s.transfer.current_speed_mbps = mbps;
+                                }
+                                trigger_repaint(&st);
+                            }
+                        }
+                    }
+                    let _ = stream.flush();
+                }));
+            }
+            for h in handles {
+                let _ = h.join();
+            }
+
+            if let Ok(mut s) = state.lock() {
+                s.transfer.is_transferring = false;
+                s.transfer.current_speed_mbps = 0.0;
+            }
+            trigger_repaint(&state);
             return;
         }
 

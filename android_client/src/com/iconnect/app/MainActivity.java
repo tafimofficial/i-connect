@@ -18,6 +18,7 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.ParcelFileDescriptor;
 import android.os.StrictMode;
 import android.provider.DocumentsContract;
 import android.provider.OpenableColumns;
@@ -894,41 +895,34 @@ public class MainActivity extends Activity implements FileTransferCallback {
                 showAddMoreFoldersDialog();
             }
         } else if (requestCode == REQ_PICK_FILES && resultCode == RESULT_OK && data != null) {
-            final ArrayList<String> selectedPaths = new ArrayList<String>();
-            final ArrayList<String> selectedNames = new ArrayList<String>();
-
+            final ArrayList<Uri> pickedUris = new ArrayList<Uri>();
             if (data.getClipData() != null) {
                 ClipData clipData = data.getClipData();
                 for (int i = 0; i < clipData.getItemCount(); i++) {
-                    Uri uri = clipData.getItemAt(i).getUri();
-                    String[] res = copyUriToTempWithName(uri);
-                    if (res != null) {
-                        selectedPaths.add(res[0]);
-                        selectedNames.add(res[1]);
-                    }
+                    pickedUris.add(clipData.getItemAt(i).getUri());
                 }
             } else if (data.getData() != null) {
-                String[] res = copyUriToTempWithName(data.getData());
-                if (res != null) {
-                    selectedPaths.add(res[0]);
-                    selectedNames.add(res[1]);
-                }
+                pickedUris.add(data.getData());
             }
 
-            if (!selectedPaths.isEmpty()) {
-                tvFileTransferInfo.setText("Sending " + selectedPaths.size() + " files...");
+            if (!pickedUris.isEmpty()) {
+                tvFileTransferInfo.setText("Preparing zero-copy turbo stream (" + pickedUris.size() + " files)...");
                 pbTransfer.setVisibility(View.VISIBLE);
+                pbTransfer.setProgress(0);
 
                 new Thread(new Runnable() {
                     @Override
                     public void run() {
-                        String[] pathsArray = selectedPaths.toArray(new String[0]);
-                        String[] namesArray = selectedNames.toArray(new String[0]);
-                        NativeCore.sendFilesBatchWithNames(pathsArray, namesArray, MainActivity.this);
+                        ArrayList<Integer> fds = new ArrayList<Integer>();
+                        ArrayList<String> names = new ArrayList<String>();
+                        ArrayList<Long> sizes = new ArrayList<Long>();
+                        ArrayList<File> tempCleanup = new ArrayList<File>();
 
-                        for (String p : pathsArray) {
-                            try { new File(p).delete(); } catch (Exception ignored) {}
+                        for (Uri uri : pickedUris) {
+                            appendUriFd(uri, null, fds, names, sizes, tempCleanup);
                         }
+
+                        dispatchFdBatch(fds, names, sizes, tempCleanup);
                     }
                 }).start();
             }
@@ -974,35 +968,28 @@ public class MainActivity extends Activity implements FileTransferCallback {
         final List<QueuedFolder> foldersToSend = new ArrayList<QueuedFolder>(queuedFolders);
         queuedFolders.clear();
 
-        tvFileTransferInfo.setText("Scanning " + foldersToSend.size() + " folder(s)...");
+        tvFileTransferInfo.setText("Scanning " + foldersToSend.size() + " folder(s) for zero-copy turbo send...");
         pbTransfer.setVisibility(View.VISIBLE);
         pbTransfer.setProgress(0);
 
         new Thread(new Runnable() {
             @Override
             public void run() {
-                final ArrayList<String> localPaths = new ArrayList<String>();
+                final ArrayList<Integer> fds = new ArrayList<Integer>();
                 final ArrayList<String> relNames = new ArrayList<String>();
-                File sendCacheDir = new File(getCacheDir(), "send_cache");
-                if (sendCacheDir.exists()) {
-                    File[] old = sendCacheDir.listFiles();
-                    if (old != null) {
-                        for (File f : old) f.delete();
-                    }
-                } else {
-                    sendCacheDir.mkdirs();
-                }
+                final ArrayList<Long> sizes = new ArrayList<Long>();
+                final ArrayList<File> tempCleanup = new ArrayList<File>();
 
                 for (QueuedFolder qf : foldersToSend) {
                     try {
                         String rootDocId = DocumentsContract.getTreeDocumentId(qf.treeUri);
-                        traverseDocumentTree(qf.treeUri, rootDocId, qf.name, localPaths, relNames, sendCacheDir);
+                        traverseDocumentTreeFds(qf.treeUri, rootDocId, qf.name, fds, relNames, sizes, tempCleanup);
                     } catch (Exception e) {
                         e.printStackTrace();
                     }
                 }
 
-                if (localPaths.isEmpty()) {
+                if (fds.isEmpty()) {
                     mainHandler.post(new Runnable() {
                         @Override
                         public void run() {
@@ -1014,29 +1001,148 @@ public class MainActivity extends Activity implements FileTransferCallback {
                     return;
                 }
 
-                mainHandler.post(new Runnable() {
-                    @Override
-                    public void run() {
-                        tvFileTransferInfo.setText("Streaming " + localPaths.size() + " files from " + foldersToSend.size() + " folder(s)...");
-                    }
-                });
-
-                String[] pathsArr = localPaths.toArray(new String[0]);
-                String[] namesArr = relNames.toArray(new String[0]);
-                NativeCore.sendFilesBatchWithNames(pathsArr, namesArr, MainActivity.this);
-
-                for (String p : pathsArr) {
-                    try { new File(p).delete(); } catch (Exception ignored) {}
-                }
+                dispatchFdBatch(fds, relNames, sizes, tempCleanup);
             }
         }).start();
     }
 
-    private void traverseDocumentTree(Uri treeUri, String currentDocId, String currentRelPath,
-                                      List<String> outLocalPaths, List<String> outRelNames, File cacheDir) {
+    private void dispatchFdBatch(final ArrayList<Integer> fds,
+                                 final ArrayList<String> names,
+                                 final ArrayList<Long> sizes,
+                                 final ArrayList<File> tempCleanup) {
+        try {
+            if (fds.isEmpty()) {
+                mainHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        tvFileTransferInfo.setText("No readable files selected.");
+                        pbTransfer.setVisibility(View.GONE);
+                        Toast.makeText(MainActivity.this, "Could not open selected file(s)!", Toast.LENGTH_SHORT).show();
+                    }
+                });
+                return;
+            }
+
+            final int count = fds.size();
+            mainHandler.post(new Runnable() {
+                @Override
+                public void run() {
+                    tvFileTransferInfo.setText("Turbo streaming " + count + " file(s) (4x zero-copy)...");
+                }
+            });
+
+            int[] fdArr = new int[count];
+            String[] nameArr = new String[count];
+            long[] sizeArr = new long[count];
+            for (int i = 0; i < count; i++) {
+                fdArr[i] = fds.get(i);
+                nameArr[i] = names.get(i);
+                sizeArr[i] = sizes.get(i);
+            }
+
+            final int res = NativeCore.sendFilesFromFds(fdArr, nameArr, sizeArr, currentServerIp, 52201, MainActivity.this);
+            if (res < 0) {
+                mainHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        pbTransfer.setVisibility(View.GONE);
+                        tvFileTransferInfo.setText("Transfer failed (err " + res + "). Check PC connection.");
+                        Toast.makeText(MainActivity.this, "Turbo send failed (" + res + ")", Toast.LENGTH_SHORT).show();
+                    }
+                });
+            }
+        } finally {
+            for (File f : tempCleanup) {
+                try { f.delete(); } catch (Exception ignored) {}
+            }
+        }
+    }
+
+    private void appendUriFd(Uri uri, String explicitRelName,
+                             List<Integer> outFds, List<String> outNames,
+                             List<Long> outSizes, List<File> tempCleanup) {
+        String displayName = explicitRelName;
+        long queriedSize = -1L;
+
+        Cursor cursor = null;
+        try {
+            cursor = getContentResolver().query(uri, null, null, null, null);
+            if (cursor != null && cursor.moveToFirst()) {
+                if (displayName == null || displayName.isEmpty()) {
+                    int nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                    if (nameIdx >= 0) displayName = cursor.getString(nameIdx);
+                }
+                int sizeIdx = cursor.getColumnIndex(OpenableColumns.SIZE);
+                if (sizeIdx >= 0 && !cursor.isNull(sizeIdx)) {
+                    queriedSize = cursor.getLong(sizeIdx);
+                }
+            }
+        } catch (Exception ignored) {
+        } finally {
+            if (cursor != null) {
+                try { cursor.close(); } catch (Exception ignored) {}
+            }
+        }
+
+        if (displayName == null || displayName.isEmpty()) {
+            displayName = "file_" + System.currentTimeMillis();
+        }
+
+        ParcelFileDescriptor pfd = null;
+        try {
+            pfd = getContentResolver().openFileDescriptor(uri, "r");
+            if (pfd != null) {
+                long statSize = pfd.getStatSize();
+                if (statSize >= 0) {
+                    int detachedFd = pfd.detachFd();
+                    pfd = null;
+                    long finalSize = (statSize > 0) ? statSize : Math.max(0L, queriedSize);
+                    outFds.add(detachedFd);
+                    outNames.add(displayName);
+                    outSizes.add(finalSize);
+                    return;
+                }
+                pfd.close();
+                pfd = null;
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            if (pfd != null) {
+                try { pfd.close(); } catch (Exception ignored) {}
+                pfd = null;
+            }
+        }
+
+        // Fallback only for virtual/non-seekable streams (pipes) that lack a backing file descriptor
+        String[] fallback = copyUriToTempWithName(uri);
+        if (fallback != null) {
+            File tmp = new File(fallback[0]);
+            ParcelFileDescriptor tmpPfd = null;
+            try {
+                tmpPfd = ParcelFileDescriptor.open(tmp, ParcelFileDescriptor.MODE_READ_ONLY);
+                int detachedFd = tmpPfd.detachFd();
+                tmpPfd = null;
+                outFds.add(detachedFd);
+                outNames.add(explicitRelName != null ? explicitRelName : fallback[1]);
+                outSizes.add(tmp.length());
+                tempCleanup.add(tmp);
+            } catch (Exception e) {
+                e.printStackTrace();
+                if (tmpPfd != null) {
+                    try { tmpPfd.close(); } catch (Exception ignored) {}
+                }
+                try { tmp.delete(); } catch (Exception ignored) {}
+            }
+        }
+    }
+
+    private void traverseDocumentTreeFds(Uri treeUri, String currentDocId, String currentRelPath,
+                                          List<Integer> outFds, List<String> outNames,
+                                          List<Long> outSizes, List<File> tempCleanup) {
+        Cursor c = null;
         try {
             Uri childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, currentDocId);
-            Cursor c = getContentResolver().query(childrenUri, new String[]{
+            c = getContentResolver().query(childrenUri, new String[]{
                     DocumentsContract.Document.COLUMN_DOCUMENT_ID,
                     DocumentsContract.Document.COLUMN_DISPLAY_NAME,
                     DocumentsContract.Document.COLUMN_MIME_TYPE
@@ -1053,39 +1159,18 @@ public class MainActivity extends Activity implements FileTransferCallback {
                 String relPath = currentRelPath.isEmpty() ? displayName : (currentRelPath + "/" + displayName);
 
                 if (DocumentsContract.Document.MIME_TYPE_DIR.equals(mimeType)) {
-                    traverseDocumentTree(treeUri, docId, relPath, outLocalPaths, outRelNames, cacheDir);
+                    traverseDocumentTreeFds(treeUri, docId, relPath, outFds, outNames, outSizes, tempCleanup);
                 } else {
                     Uri fileUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId);
-                    File tempFile = copyDocUriToCache(fileUri, cacheDir, outLocalPaths.size());
-                    if (tempFile != null) {
-                        outLocalPaths.add(tempFile.getAbsolutePath());
-                        outRelNames.add(relPath);
-                    }
+                    appendUriFd(fileUri, relPath, outFds, outNames, outSizes, tempCleanup);
                 }
             }
-            c.close();
         } catch (Exception e) {
             e.printStackTrace();
-        }
-    }
-
-    private File copyDocUriToCache(Uri uri, File cacheDir, int index) {
-        try {
-            File tempFile = new File(cacheDir, "f_" + index + "_" + System.currentTimeMillis() + ".tmp");
-            InputStream in = getContentResolver().openInputStream(uri);
-            if (in == null) return null;
-            FileOutputStream out = new FileOutputStream(tempFile);
-            byte[] buf = new byte[256 * 1024];
-            int len;
-            while ((len = in.read(buf)) > 0) {
-                out.write(buf, 0, len);
+        } finally {
+            if (c != null) {
+                try { c.close(); } catch (Exception ignored) {}
             }
-            in.close();
-            out.close();
-            return tempFile;
-        } catch (Exception e) {
-            e.printStackTrace();
-            return null;
         }
     }
 
@@ -1103,7 +1188,7 @@ public class MainActivity extends Activity implements FileTransferCallback {
             InputStream in = getContentResolver().openInputStream(uri);
             if (in == null) return null;
             FileOutputStream out = new FileOutputStream(tempFile);
-            byte[] buf = new byte[256 * 1024];
+            byte[] buf = new byte[1024 * 1024];
             int len;
             while ((len = in.read(buf)) > 0) {
                 out.write(buf, 0, len);

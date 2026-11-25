@@ -15,8 +15,10 @@ pub const PROTO_MAGIC: u32 = 0x5243_5031; // "RCP1"
 pub const DISCOVER_PING_MAGIC: &str = "RCP_DISCOVER_SERVER";
 pub const DISCOVER_PONG_MAGIC: &str = "RCP_SERVER_ANNOUNCE";
 
-pub const CHUNK_BUFFER_SIZE: usize = 256 * 1024;
-pub const SOCKET_BUFFER_SIZE: i32 = 4 * 1024 * 1024;
+pub const CHUNK_BUFFER_SIZE: usize = 1024 * 1024;
+pub const SOCKET_BUFFER_SIZE: i32 = 8 * 1024 * 1024;
+pub const PARALLEL_FILE_STREAMS: usize = 4;
+pub const STRIPE_SIZE: u64 = 4 * 1024 * 1024;
 
 pub const HEADER_SIZE: usize = 8;
 
@@ -43,6 +45,8 @@ pub enum MsgType {
     FileDataChunk = 62,
     FileItemFinish = 63,
     FileBatchFinish = 64,
+    FileRangeHeader = 65,
+    FileChannelHello = 66,
 }
 
 impl MsgType {
@@ -64,6 +68,8 @@ impl MsgType {
             62 => Some(Self::FileDataChunk),
             63 => Some(Self::FileItemFinish),
             64 => Some(Self::FileBatchFinish),
+            65 => Some(Self::FileRangeHeader),
+            66 => Some(Self::FileChannelHello),
             _ => None,
         }
     }
@@ -601,6 +607,120 @@ impl MsgFileItemHeader {
     }
 }
 
+/// Multi-stream parallel byte-range stripe header (304 bytes).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MsgFileRangeHeader {
+    pub batch_id: u64,
+    pub file_index: u32,
+    pub total_files: u32,
+    pub batch_total_bytes: u64,
+    pub file_size: u64,
+    pub offset: u64,
+    pub chunk_len: u64,
+    pub file_name: String,
+}
+
+impl MsgFileRangeHeader {
+    pub const WIRE_LEN: usize = 304;
+
+    pub fn new(
+        batch_id: u64,
+        file_index: u32,
+        total_files: u32,
+        batch_total_bytes: u64,
+        file_size: u64,
+        offset: u64,
+        chunk_len: u64,
+        file_name: &str,
+    ) -> Self {
+        Self {
+            batch_id,
+            file_index,
+            total_files,
+            batch_total_bytes,
+            file_size,
+            offset,
+            chunk_len,
+            file_name: file_name.replace('\\', "/"),
+        }
+    }
+
+    pub fn encode(&self) -> [u8; Self::WIRE_LEN] {
+        let mut out = [0u8; Self::WIRE_LEN];
+        out[0..8].copy_from_slice(&self.batch_id.to_le_bytes());
+        out[8..12].copy_from_slice(&self.file_index.to_le_bytes());
+        out[12..16].copy_from_slice(&self.total_files.to_le_bytes());
+        out[16..24].copy_from_slice(&self.batch_total_bytes.to_le_bytes());
+        out[24..32].copy_from_slice(&self.file_size.to_le_bytes());
+        out[32..40].copy_from_slice(&self.offset.to_le_bytes());
+        out[40..48].copy_from_slice(&self.chunk_len.to_le_bytes());
+        write_fixed_cstr(&mut out[48..304], &self.file_name);
+        out
+    }
+
+    pub fn decode(buf: &[u8]) -> io::Result<Self> {
+        if buf.len() < Self::WIRE_LEN {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "FileRangeHeader too short",
+            ));
+        }
+        let u64_at = |o: usize| {
+            u64::from_le_bytes([
+                buf[o],
+                buf[o + 1],
+                buf[o + 2],
+                buf[o + 3],
+                buf[o + 4],
+                buf[o + 5],
+                buf[o + 6],
+                buf[o + 7],
+            ])
+        };
+        Ok(Self {
+            batch_id: u64_at(0),
+            file_index: u32::from_le_bytes([buf[8], buf[9], buf[10], buf[11]]),
+            total_files: u32::from_le_bytes([buf[12], buf[13], buf[14], buf[15]]),
+            batch_total_bytes: u64_at(16),
+            file_size: u64_at(24),
+            offset: u64_at(32),
+            chunk_len: u64_at(40),
+            file_name: read_fixed_cstr(&buf[48..304]),
+        })
+    }
+}
+
+/// Identifies a pre-connected pooled worker channel from Phone -> PC.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MsgFileChannelHello {
+    pub role: u8, // 1 = incoming receiver pool worker
+    pub device_id: String,
+}
+
+impl MsgFileChannelHello {
+    pub const WIRE_LEN: usize = 65;
+
+    pub fn encode(&self) -> [u8; Self::WIRE_LEN] {
+        let mut out = [0u8; Self::WIRE_LEN];
+        out[0] = self.role;
+        write_fixed_cstr(&mut out[1..65], &self.device_id);
+        out
+    }
+
+    pub fn decode(buf: &[u8]) -> io::Result<Self> {
+        if buf.len() < Self::WIRE_LEN {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "FileChannelHello too short",
+            ));
+        }
+        Ok(Self {
+            role: buf[0],
+            device_id: read_fixed_cstr(&buf[1..65]),
+        })
+    }
+}
+
 /// Write a framed packet (`RemoteHeader` + payload) in a single contiguous syscall.
 pub fn send_frame<W: Write>(writer: &mut W, msg_type: MsgType, payload: &[u8]) -> io::Result<()> {
     let hdr = RemoteHeader::new(msg_type, payload.len() as u16).to_bytes();
@@ -717,6 +837,18 @@ mod tests {
         let decoded_item = MsgFileItemHeader::decode(&item.encode()).unwrap();
         assert_eq!(decoded_item.file_name, "Photos/2026/sunset.jpg");
         assert_eq!(decoded_item.file_size, 123456);
+
+        let range = MsgFileRangeHeader::new(99, 1, 5, 50_000_000, 10_000_000, 4_194_304, 4_194_304, "Videos\\clip.mp4");
+        let dec_range = MsgFileRangeHeader::decode(&range.encode()).unwrap();
+        assert_eq!(dec_range.batch_id, 99);
+        assert_eq!(dec_range.offset, 4_194_304);
+        assert_eq!(dec_range.file_name, "Videos/clip.mp4");
+
+        let hello = MsgFileChannelHello {
+            role: 1,
+            device_id: "uuid-99".into(),
+        };
+        assert_eq!(MsgFileChannelHello::decode(&hello.encode()).unwrap(), hello);
     }
 
     #[test]
