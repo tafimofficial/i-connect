@@ -17,7 +17,7 @@ use jni::objects::{JClass, JIntArray, JLongArray, JObject, JObjectArray, JString
 use jni::sys::{jboolean, jint, jstring, JNI_FALSE, JNI_TRUE};
 use jni::JNIEnv;
 use log::{error, info};
-use socket2::{Domain, Protocol, Socket, Type};
+use socket2::{Domain, Protocol, Socket, TcpKeepalive, Type};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufReader, BufWriter, Read, Write};
@@ -44,6 +44,7 @@ struct CoreState {
 
 static CORE: OnceLock<CoreState> = OnceLock::new();
 static NEXT_BATCH_ID: AtomicU64 = AtomicU64::new(1);
+static ACTIVE_WORKERS: AtomicU32 = AtomicU32::new(0);
 
 fn core() -> &'static CoreState {
     CORE.get_or_init(|| CoreState {
@@ -53,6 +54,27 @@ fn core() -> &'static CoreState {
         device_id: Mutex::new("android-device-default".to_string()),
         device_name: Mutex::new("Android Phone".to_string()),
     })
+}
+
+struct WorkerGuard {
+    counted: bool,
+}
+
+impl WorkerGuard {
+    fn activate(&mut self) {
+        if !self.counted {
+            self.counted = true;
+            ACTIVE_WORKERS.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+}
+
+impl Drop for WorkerGuard {
+    fn drop(&mut self) {
+        if self.counted {
+            ACTIVE_WORKERS.fetch_sub(1, Ordering::Relaxed);
+        }
+    }
 }
 
 struct IncomingBatchProgress {
@@ -107,6 +129,10 @@ fn send_control_packet(msg_type: MsgType, payload: &[u8]) -> i32 {
 /// so the kernel negotiates full TCP Window Scaling during the SYN handshake.
 fn connect_turbo_file_socket(ip: Ipv4Addr, port: u16) -> Option<TcpStream> {
     let sock = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP)).ok()?;
+    let ka = TcpKeepalive::new()
+        .with_time(Duration::from_secs(10))
+        .with_interval(Duration::from_secs(5));
+    let _ = sock.set_tcp_keepalive(&ka);
     let _ = sock.set_send_buffer_size(SOCKET_BUFFER_SIZE as usize);
     let _ = sock.set_recv_buffer_size(SOCKET_BUFFER_SIZE as usize);
     let _ = sock.set_tcp_nodelay(false);
@@ -1145,6 +1171,31 @@ fn run_incoming_stream_loop(
     }
 }
 
+#[no_mangle]
+pub extern "system" fn Java_com_iconnect_app_NativeCore_closeFileWorkers(
+    _env: JNIEnv,
+    _class: JClass,
+) {
+    if let Ok(mut g) = core().file_sock.lock() {
+        if let Some(s) = g.take() {
+            let _ = s.shutdown(std::net::Shutdown::Both);
+        }
+    }
+    if let Ok(mut workers) = core().worker_socks.lock() {
+        for s in workers.drain(..) {
+            let _ = s.shutdown(std::net::Shutdown::Both);
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_iconnect_app_NativeCore_getActiveWorkerCount(
+    _env: JNIEnv,
+    _class: JClass,
+) -> jint {
+    ACTIVE_WORKERS.load(Ordering::Relaxed) as jint
+}
+
 /// Opens a pooled incoming worker socket to PC port 52201, registers via FileChannelHello,
 /// and receives parallel PC -> Phone stripes at max wire speed.
 #[no_mangle]
@@ -1177,6 +1228,9 @@ pub extern "system" fn Java_com_iconnect_app_NativeCore_runIncomingWorker(
     if send_frame(&mut stream, MsgType::FileChannelHello, &hello.encode()).is_err() {
         return;
     }
+
+    let mut guard = WorkerGuard { counted: false };
+    guard.activate();
 
     if let Ok(cloned) = stream.try_clone() {
         if let Ok(mut workers) = core().worker_socks.lock() {

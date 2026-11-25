@@ -38,6 +38,8 @@ public class RemoteService extends Service {
     private WifiManager.WifiLock wifiLock;
     private NotificationManager notificationManager;
     private boolean isListeningIncoming = false;
+    private String activeIncomingIp = "";
+    private int incomingGeneration = 0;
 
     public static RemoteService getInstance() {
         return instance;
@@ -203,8 +205,11 @@ public class RemoteService extends Service {
         return START_STICKY;
     }
 
-    private void handleDisconnect() {
+    private synchronized void handleDisconnect() {
         isRunning = false;
+        incomingGeneration++;
+        isListeningIncoming = false;
+        activeIncomingIp = "";
         NativeCore.disconnect();
         releaseLocks();
         if (stateListener != null) {
@@ -220,9 +225,13 @@ public class RemoteService extends Service {
     }
 
     @Override
-    public void onDestroy() {
+    public synchronized void onDestroy() {
         super.onDestroy();
         isRunning = false;
+        incomingGeneration++;
+        isListeningIncoming = false;
+        activeIncomingIp = "";
+        NativeCore.closeFileWorkers();
         instance = null;
         releaseLocks();
     }
@@ -257,7 +266,15 @@ public class RemoteService extends Service {
     }
 
     private synchronized void startIncomingFileListener(final String ip) {
-        if (isListeningIncoming || ip == null || ip.isEmpty()) return;
+        if (ip == null || ip.isEmpty()) return;
+        if (isListeningIncoming && ip.equals(activeIncomingIp) && NativeCore.getActiveWorkerCount() >= 6) {
+            return;
+        }
+
+        // Tear down any stale workers from a previous IP or interrupted session before connecting fresh ones.
+        NativeCore.closeFileWorkers();
+        final int myGen = ++incomingGeneration;
+        activeIncomingIp = ip;
         isListeningIncoming = true;
 
         File saveFolderTmp = null;
@@ -292,9 +309,10 @@ public class RemoteService extends Service {
             }
         };
 
-        // Spawn 4 parallel incoming workers so PC -> Phone drag & drop saturates the link
-        for (int w = 0; w < 4; w++) {
-            final int workerIdx = w;
+        // Spawn 8 parallel incoming workers so PC -> Phone transfers saturate router/Wi-Fi downlink.
+        final int workerCount = 8;
+        final java.util.concurrent.atomic.AtomicInteger remaining = new java.util.concurrent.atomic.AtomicInteger(workerCount);
+        for (int w = 0; w < workerCount; w++) {
             new Thread(new Runnable() {
                 @Override
                 public void run() {
@@ -303,8 +321,12 @@ public class RemoteService extends Service {
                     } catch (Exception e) {
                         e.printStackTrace();
                     } finally {
-                        if (workerIdx == 0) {
-                            isListeningIncoming = false;
+                        if (remaining.decrementAndGet() == 0) {
+                            synchronized (RemoteService.this) {
+                                if (myGen == incomingGeneration) {
+                                    isListeningIncoming = false;
+                                }
+                            }
                         }
                     }
                 }

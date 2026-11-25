@@ -26,11 +26,13 @@ public class NativeCore {
     // System Shortcuts
     public static native void sendSysCmd(int cmd);
 
-    // HyperLink 4-Stream Zero-Copy File Engine
+    // HyperLink 4-Stream/8-Worker Zero-Copy File Engine
     public static native int connectFileChannel(String ip, int port);
     public static native int sendFilesFromFds(int[] fds, String[] relativeNames, long[] fileSizes, String serverIp, int port, FileTransferCallback callback);
     public static native int sendFilesBatch(String[] filePaths, FileTransferCallback callback);
     public static native int sendFilesBatchWithNames(String[] filePaths, String[] relativeNames, FileTransferCallback callback);
     public static native void listenIncomingFiles(String saveDir, FileTransferCallback callback);
     public static native void runIncomingWorker(String ip, int port, String saveDir, FileTransferCallback callback);
+    public static native void closeFileWorkers();
+    public static native int getActiveWorkerCount();
 }

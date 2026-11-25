@@ -13,7 +13,7 @@ use i_connect_proto::{
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufReader, BufWriter, Read, Write};
-use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream, UdpSocket};
+use std::net::{IpAddr, Ipv4Addr, SocketAddrV4, TcpListener, TcpStream, UdpSocket};
 use std::os::windows::fs::FileExt;
 use std::os::windows::io::AsRawSocket;
 use std::path::{Path, PathBuf};
@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use socket2::{Domain, Protocol, Socket, Type};
+use socket2::{Domain, Protocol, Socket, TcpKeepalive, Type};
 use windows::core::{HSTRING, PCWSTR};
 use windows::Win32::Foundation::{ERROR_BUFFER_OVERFLOW, ERROR_SUCCESS, HWND, LPARAM, WPARAM};
 use windows::Win32::Graphics::Gdi::InvalidateRect;
@@ -288,12 +288,13 @@ fn control_server_thread(state: SharedState, running: RunningFlag) {
         match listener.accept() {
             Ok((stream, addr)) => {
                 let _ = stream.set_nonblocking(false);
+                let peer_ip = addr.ip();
                 if let Ok(mut s) = state.lock() {
-                    s.client_ip = addr.ip().to_string();
+                    s.client_ip = peer_ip.to_string();
                 }
                 let st = state.clone();
                 let run = running.clone();
-                thread::spawn(move || handle_control_client(stream, st, run));
+                thread::spawn(move || handle_control_client(stream, peer_ip, st, run));
             }
             Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                 thread::sleep(Duration::from_millis(50));
@@ -305,7 +306,12 @@ fn control_server_thread(state: SharedState, running: RunningFlag) {
     }
 }
 
-fn handle_control_client(mut stream: TcpStream, state: SharedState, running: RunningFlag) {
+fn handle_control_client(mut stream: TcpStream, peer_ip: IpAddr, state: SharedState, running: RunningFlag) {
+    let sock_ref = socket2::SockRef::from(&stream);
+    let ka = TcpKeepalive::new()
+        .with_time(Duration::from_secs(10))
+        .with_interval(Duration::from_secs(5));
+    let _ = sock_ref.set_tcp_keepalive(&ka);
     let _ = stream.set_nodelay(true);
     let _ = stream.set_read_timeout(Some(Duration::from_secs(35)));
 
@@ -370,12 +376,19 @@ fn handle_control_client(mut stream: TcpStream, state: SharedState, running: Run
 
     let _ = stream.set_read_timeout(Some(Duration::from_secs(15)));
 
-    if let Ok(mut s) = state.lock() {
+    let my_ctrl_id = if let Ok(mut s) = state.lock() {
+        s.active_control_conn_id = s.active_control_conn_id.wrapping_add(1).max(1);
+        let id = s.active_control_conn_id;
         s.is_connected = true;
+        s.client_ip = peer_ip.to_string();
         s.client_name = auth_req.device_name.clone();
         s.client_id = auth_req.device_id.clone();
         s.paired_count = crate::state::count_paired_devices();
-    }
+        s.client_file_workers.retain(|(_, w_ip, _)| *w_ip == peer_ip);
+        id
+    } else {
+        0
+    };
     post_ui_msg(&state, WM_APP_TRAY_CONNECTED);
     trigger_repaint(&state);
 
@@ -454,19 +467,32 @@ fn handle_control_client(mut stream: TcpStream, state: SharedState, running: Run
         }
     }
 
-    if let Ok(mut s) = state.lock() {
-        s.is_connected = false;
-        s.client_name = "None".to_string();
-        s.client_id.clear();
-        s.client_file_stream = None;
-        s.client_file_workers.clear();
+    let was_active = if let Ok(mut s) = state.lock() {
+        if s.active_control_conn_id == my_ctrl_id {
+            s.is_connected = false;
+            s.client_name = "None".to_string();
+            s.client_id.clear();
+            s.client_file_stream = None;
+            s.client_file_workers.clear();
+            true
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+    if was_active {
+        post_ui_msg(&state, WM_APP_TRAY_DISCONNECTED);
+        trigger_repaint(&state);
     }
-    post_ui_msg(&state, WM_APP_TRAY_DISCONNECTED);
-    trigger_repaint(&state);
 }
 
 fn configure_turbo_socket(stream: &TcpStream) {
     let sock_ref = socket2::SockRef::from(stream);
+    let ka = TcpKeepalive::new()
+        .with_time(Duration::from_secs(10))
+        .with_interval(Duration::from_secs(5));
+    let _ = sock_ref.set_tcp_keepalive(&ka);
     // Keep Nagle enabled on bulk file streams so Wi-Fi A-MPDU frames coalesce cleanly.
     let _ = sock_ref.set_tcp_nodelay(false);
     let _ = sock_ref.set_recv_buffer_size(SOCKET_BUFFER_SIZE as usize);
@@ -551,11 +577,12 @@ fn file_receiver_server_thread(state: SharedState, running: RunningFlag) {
 
     while running.load(Ordering::Relaxed) {
         match listener.accept() {
-            Ok((file_stream, _)) => {
+            Ok((file_stream, addr)) => {
                 let st = state.clone();
                 let run = running.clone();
                 let dir = save_dir.clone();
-                thread::spawn(move || handle_file_client(file_stream, st, run, dir));
+                let peer_ip = addr.ip();
+                thread::spawn(move || handle_file_client(file_stream, peer_ip, st, run, dir));
             }
             Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                 thread::sleep(Duration::from_millis(50));
@@ -569,6 +596,7 @@ fn file_receiver_server_thread(state: SharedState, running: RunningFlag) {
 
 fn handle_file_client(
     mut file_stream: TcpStream,
+    peer_ip: IpAddr,
     state: SharedState,
     running: RunningFlag,
     save_dir: PathBuf,
@@ -608,10 +636,11 @@ fn handle_file_client(
                         is_pooled_worker = true;
                         if let Ok(cloned) = file_stream.try_clone() {
                             if let Ok(mut s) = state.lock() {
-                                if s.client_file_workers.len() >= 8 {
+                                s.client_file_workers.retain(|(_, w_ip, _)| *w_ip == peer_ip);
+                                if s.client_file_workers.len() >= 12 {
                                     s.client_file_workers.remove(0);
                                 }
-                                s.client_file_workers.push((my_conn_id, cloned));
+                                s.client_file_workers.push((my_conn_id, peer_ip, cloned));
                             }
                         }
                     }
@@ -808,7 +837,7 @@ fn handle_file_client(
 
     if let Ok(mut s) = state.lock() {
         if is_pooled_worker {
-            s.client_file_workers.retain(|(id, _)| *id != my_conn_id);
+            s.client_file_workers.retain(|(id, _, _)| *id != my_conn_id);
         }
         if s.client_file_conn_id == my_conn_id {
             s.client_file_stream = None;
@@ -885,24 +914,25 @@ pub fn send_dropped_paths_to_phone(paths: Vec<PathBuf>, state: SharedState) {
             .map(|s| {
                 s.client_file_workers
                     .iter()
-                    .filter_map(|(_, sock)| sock.try_clone().ok())
+                    .filter_map(|(_, _, sock)| sock.try_clone().ok())
                     .collect()
             })
             .unwrap_or_default();
 
         if !workers.is_empty() {
-            // 4-Stream Parallel Striped Transfer (PC -> Phone at max Wi-Fi/Hotspot wire speed)
+            // 8-Stream Parallel Striped Transfer (PC -> Phone at max Wi-Fi/Hotspot downlink speed)
             let batch_id = NEXT_SEND_BATCH_ID.fetch_add(1, Ordering::Relaxed);
             let total_files = items.len() as u32;
+            let stripe_sz = (total_bytes / 32).clamp(1024 * 1024, STRIPE_SIZE);
             let mut queue = VecDeque::new();
             for (idx, item) in items.iter().enumerate() {
                 if item.file_size == 0 {
-                    queue.push_back((idx as u32, item.full_path.clone(), item.rel_name.clone(), 0u64, 0u64, 0u64));
+                    queue.push_back((idx as u32, item.full_path.clone(), item.rel_name.clone(), 0u64, 0u64, 0u64, 0u8));
                 } else {
                     let mut off = 0u64;
                     while off < item.file_size {
-                        let len = (item.file_size - off).min(STRIPE_SIZE);
-                        queue.push_back((idx as u32, item.full_path.clone(), item.rel_name.clone(), item.file_size, off, len));
+                        let len = (item.file_size - off).min(stripe_sz);
+                        queue.push_back((idx as u32, item.full_path.clone(), item.rel_name.clone(), item.file_size, off, len, 0u8));
                         off += len;
                     }
                 }
@@ -939,7 +969,7 @@ pub fn send_dropped_paths_to_phone(paths: Vec<PathBuf>, state: SharedState) {
                             let mut guard = q.lock().unwrap();
                             guard.pop_front()
                         };
-                        let Some((fidx, fpath, rel_name, fsize, offset, len)) = task else {
+                        let Some((fidx, fpath, rel_name, fsize, offset, len, retries)) = task else {
                             break;
                         };
                         let Ok(file) = File::open(&fpath) else {
@@ -957,11 +987,15 @@ pub fn send_dropped_paths_to_phone(paths: Vec<PathBuf>, state: SharedState) {
                             &rel_name,
                         );
                         if send_frame(&mut stream, MsgType::FileRangeHeader, &hdr.encode()).is_err() {
+                            if retries < 4 {
+                                q.lock().unwrap().push_back((fidx, fpath, rel_name, fsize, offset, len, retries + 1));
+                            }
                             break;
                         }
 
                         let mut cur_off = offset;
                         let mut rem = len;
+                        let mut sock_failed = false;
                         while rem > 0 {
                             let to_read = (rem as usize).min(CHUNK_BUFFER_SIZE);
                             let n = match file.seek_read(&mut chunk_buf[..to_read], cur_off) {
@@ -969,6 +1003,7 @@ pub fn send_dropped_paths_to_phone(paths: Vec<PathBuf>, state: SharedState) {
                                 Ok(n) => n,
                             };
                             if stream.write_all(&chunk_buf[..n]).is_err() {
+                                sock_failed = true;
                                 break;
                             }
                             cur_off += n as u64;
@@ -996,6 +1031,12 @@ pub fn send_dropped_paths_to_phone(paths: Vec<PathBuf>, state: SharedState) {
                                 }
                                 trigger_repaint(&st);
                             }
+                        }
+                        if sock_failed {
+                            if rem > 0 && retries < 4 {
+                                q.lock().unwrap().push_back((fidx, fpath, rel_name, fsize, cur_off, rem, retries + 1));
+                            }
+                            break;
                         }
                     }
                     let _ = stream.flush();

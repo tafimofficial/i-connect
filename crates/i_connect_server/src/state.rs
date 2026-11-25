@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
-use std::net::TcpStream;
+use std::net::{IpAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
@@ -57,7 +57,8 @@ pub struct AppState {
     pub client_ip: String,
     pub client_file_stream: Option<TcpStream>,
     pub client_file_conn_id: u64,
-    pub client_file_workers: Vec<(u64, TcpStream)>,
+    pub active_control_conn_id: u64,
+    pub client_file_workers: Vec<(u64, IpAddr, TcpStream)>,
 
     // Live transfer stats
     pub transfer: TransferProgress,
@@ -84,6 +85,7 @@ impl Default for AppState {
             client_ip: String::new(),
             client_file_stream: None,
             client_file_conn_id: 0,
+            active_control_conn_id: 0,
             client_file_workers: Vec::new(),
             transfer: TransferProgress::default(),
             total_packets_received: 0,
